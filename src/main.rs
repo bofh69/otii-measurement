@@ -117,7 +117,7 @@ impl Tracer for FileTracer {
 
 impl FileTracer {
     fn new(path: &std::path::PathBuf) -> Self {
-        FileTracer {
+        Self {
             file: std::fs::File::create(path).unwrap(),
         }
     }
@@ -138,11 +138,11 @@ impl std::str::FromStr for Unit {
 
 pub struct Otii {
     port: std::io::BufReader<serial::SystemPort>,
-    tracer: Box<Tracer>,
+    tracer: Box<dyn Tracer>,
 }
 
 impl Otii {
-    pub fn new(dev: &std::path::PathBuf, tracer: Box<Tracer>) -> Otii {
+    pub fn new(dev: &std::path::PathBuf, tracer: Box<dyn Tracer>) -> Otii {
         use serial::SerialPort;
         let mut port = std::io::BufReader::new(serial::open(dev).unwrap());
         port.get_mut().configure(&SERIAL_SETTINGS).unwrap();
@@ -274,9 +274,7 @@ impl Otii {
         let mut total_value = 0.0;
         let mut nr_values = 0;
         let pb = indicatif::ProgressBar::new(u64::from(max_samples));
-        pb.set_style(
-            indicatif::ProgressStyle::default_bar().progress_chars("█▉▊▋▌▍▎▏  "),
-        );
+        pb.set_style(indicatif::ProgressStyle::default_bar().progress_chars("█▉▊▋▌▍▎▏  "));
         loop {
             if let Some(line) = self.read_line() {
                 let mut data = line.trim().split(':');
