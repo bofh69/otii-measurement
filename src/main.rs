@@ -31,14 +31,18 @@ enum Unit {
 /// Measure current with Otii Arc measurement tool
 #[derive(StructOpt)]
 struct Cli {
-    // TODO: Change to some timespan
+
     /// Give up measurement after this many minutes
     #[structopt(long, default_value = "20")]
-    timeout: u32,
+    timeout_min: u32,
 
     /// Measure for this many seconds
     #[structopt(name = "measurement-time", long, default_value = "1")]
-    measurement_time: u32,
+    measurement_time_sec: u32,
+    
+    /// Wait this many seconds until measurement starts
+    #[structopt(name = "wait", long, default_value = "0")]
+    wait_to_start_sec: u32,
 
     /// The main voltage
     #[structopt(short, long, default_value = "3.3")]
@@ -416,7 +420,7 @@ fn main() {
     let timer = timer::Timer::new();
     // If _guard is dropped, the timer is cancelled
     let _guard =
-        timer.schedule_with_delay(chrono::Duration::minutes(i64::from(args.timeout)), || {
+        timer.schedule_with_delay(chrono::Duration::minutes(i64::from(args.timeout_min)), || {
             write_to_user("Measurement took too long time, aborting...");
             std::process::exit(1);
         });
@@ -438,14 +442,14 @@ fn main() {
         otii.wait_for_gpi2(value);
     }
     // Flush some measurement.
-    otii.get_average_current(500);
+    otii.get_average_current(500 + args.wait_to_start_sec * 1000);
 
     write_to_user(&format!(
         "Starting measurement for {} seconds",
-        args.measurement_time
+        args.measurement_time_sec
     ));
     let start_measurement_time = std::time::Instant::now();
-    let avg = otii.get_average_current(args.measurement_time * SAMPLES_PER_SECOND) / mc_gain as f64;
+    let avg = otii.get_average_current(args.measurement_time_sec * SAMPLES_PER_SECOND) / mc_gain as f64;
     write_to_user(&format!(
         "Done. Measurement took {} seconds",
         start_measurement_time.elapsed().as_secs()
