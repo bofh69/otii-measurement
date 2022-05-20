@@ -39,18 +39,20 @@ The communication log is written to output.log
 
 ## Cross compile for RPi
 ```sh
-rustup target add armv7-unknown-linux-gnueabihf
+rustup target add armv7-unknown-linux-musleabihf
 
-sudo apt-get install gcc-multilib-arm-linux-gnueabihf
+sudo apt-get install gcc-multilib-arm-linux-gnueabihf musl-tools
 ```
 
 Add to `~/.cargo/config`:
 ```
-[target.armv7-unknown-linux-gnueabihf]
+[target.armv7-unknown-linux-musleabihf]
 linker = "arm-linux-gnueabihf-gcc"
 ```
 
 Build with:
 ```sh
-cargo build --target armv7-unknown-linux-gnueabihf
+CC=/usr/bin/musl-gcc cargo build --target armv7-unknown-linux-musleabihf --release
 ```
+
+The file is then in ./target/armv7-unknown-linux-musleabihf/release/otii_measurement

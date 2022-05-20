@@ -1,4 +1,3 @@
-use serial;
 use std::collections::HashMap;
 use structopt::StructOpt;
 
@@ -32,14 +31,17 @@ enum Unit {
 /// Measure current with Otii Arc measurement tool
 #[derive(StructOpt)]
 struct Cli {
-    // TODO: Change to some timespan
     /// Give up measurement after this many minutes
     #[structopt(long, default_value = "20")]
-    timeout: u32,
+    timeout_min: u32,
 
     /// Measure for this many seconds
     #[structopt(name = "measurement-time", long, default_value = "1")]
-    measurement_time: u32,
+    measurement_time_sec: u32,
+
+    /// Wait this many seconds until measurement starts
+    #[structopt(name = "wait", long, default_value = "0")]
+    wait_to_start_sec: u32,
 
     /// The main voltage
     #[structopt(short, long, default_value = "3.3")]
@@ -79,6 +81,10 @@ struct Cli {
     /// GPI2 needs to be true before measurement
     #[structopt(long = "wait-for-GPI2")]
     wait_for_gpi2: Option<bool>,
+
+    /// Don't show a progress bar
+    #[structopt(long = "quiet")]
+    quiet: bool,
 }
 
 pub trait Tracer {
@@ -156,7 +162,7 @@ impl Otii {
         use std::io::BufRead;
         let mut buff = "".to_string();
         if self.port.read_line(&mut buff).is_ok() {
-            self.tracer.read(&buff.trim());
+            self.tracer.read(buff.trim());
             Some(buff)
         } else {
             None
@@ -268,13 +274,18 @@ impl Otii {
 
     // TODO Rewrite to use closure for the actual parsing to remove
     // code duplication with wait_for_gpi
-    fn get_average_current(&mut self, max_samples: u32) -> f64 {
+    fn get_average_current(&mut self, max_samples: u32, quiet: bool) -> f64 {
         let mut samples = 1;
         let mut last_sample = 0;
         let mut total_value = 0.0;
         let mut nr_values = 0;
-        let pb = indicatif::ProgressBar::new(u64::from(max_samples));
-        pb.set_style(indicatif::ProgressStyle::default_bar().progress_chars("█▉▊▋▌▍▎▏  "));
+        let pb = if quiet {
+            None
+        } else {
+            let pb = indicatif::ProgressBar::new(u64::from(max_samples));
+            pb.set_style(indicatif::ProgressStyle::default_bar().progress_chars("█▉▊▋▌▍▎▏  "));
+            Some(pb)
+        };
         loop {
             if let Some(line) = self.read_line() {
                 let mut data = line.trim().split(':');
@@ -304,23 +315,25 @@ impl Otii {
                             high_value = Some(sample_value);
                         }
                     }
-                    if high_value.is_some() && Some("H") == mc_values.next() {
-                        total_value += high_value.unwrap() * f64::from(tmp_nrs);
-                    } else {
-                        total_value += tmp_values;
-                    }
+                    total_value += match (high_value, mc_values.next()) {
+                        (Some(high_value), Some("H")) => high_value * 4f64,
+                        _ => tmp_values,
+                    };
                     nr_values += tmp_nrs;
                     samples += 1;
-                    pb.inc(1);
-                    pb.set_message(&format!(
-                        "{}/{}s",
-                        indicatif::HumanDuration(std::time::Duration::from_secs(u64::from(
-                            samples / SAMPLES_PER_SECOND
-                        ))),
-                        indicatif::HumanDuration(std::time::Duration::from_secs(u64::from(
-                            max_samples
-                        )))
-                    ));
+                    if let Some(ref pb) = &pb {
+                        pb.inc(1);
+
+                        pb.set_message(format!(
+                            "{}/{}s",
+                            indicatif::HumanDuration(std::time::Duration::from_secs(u64::from(
+                                samples / SAMPLES_PER_SECOND
+                            ))),
+                            indicatif::HumanDuration(std::time::Duration::from_secs(u64::from(
+                                max_samples
+                            )))
+                        ));
+                    }
 
                     if samples > max_samples {
                         break;
@@ -328,7 +341,9 @@ impl Otii {
                 }
             }
         }
-        pb.finish();
+        if let Some(pb) = pb {
+            pb.finish();
+        }
         total_value / f64::from(nr_values)
     }
 
@@ -416,11 +431,13 @@ fn main() {
     // Handle timeout:
     let timer = timer::Timer::new();
     // If _guard is dropped, the timer is cancelled
-    let _guard =
-        timer.schedule_with_delay(chrono::Duration::minutes(i64::from(args.timeout)), || {
+    let _guard = timer.schedule_with_delay(
+        chrono::Duration::minutes(i64::from(args.timeout_min)),
+        || {
             write_to_user("Measurement took too long time, aborting...");
             std::process::exit(1);
-        });
+        },
+    );
 
     let tracer = get_tracer(args.debug_filename);
 
@@ -439,14 +456,15 @@ fn main() {
         otii.wait_for_gpi2(value);
     }
     // Flush some measurement.
-    otii.get_average_current(500);
+    otii.get_average_current(500 + args.wait_to_start_sec * 1000, true);
 
     write_to_user(&format!(
         "Starting measurement for {} seconds",
-        args.measurement_time
+        args.measurement_time_sec
     ));
     let start_measurement_time = std::time::Instant::now();
-    let avg = otii.get_average_current(args.measurement_time * SAMPLES_PER_SECOND) / mc_gain as f64;
+    let avg = otii.get_average_current(args.measurement_time_sec * SAMPLES_PER_SECOND, args.quiet)
+        / mc_gain as f64;
     write_to_user(&format!(
         "Done. Measurement took {} seconds",
         start_measurement_time.elapsed().as_secs()
