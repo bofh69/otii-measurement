@@ -1,4 +1,3 @@
-use serial;
 use std::collections::HashMap;
 use structopt::StructOpt;
 
@@ -156,7 +155,7 @@ impl Otii {
         use std::io::BufRead;
         let mut buff = "".to_string();
         if self.port.read_line(&mut buff).is_ok() {
-            self.tracer.read(&buff.trim());
+            self.tracer.read(buff.trim());
             Some(buff)
         } else {
             None
@@ -304,11 +303,10 @@ impl Otii {
                             high_value = Some(sample_value);
                         }
                     }
-                    if high_value.is_some() && Some("H") == mc_values.next() {
-                        total_value += high_value.unwrap() * f64::from(tmp_nrs);
-                    } else {
-                        total_value += tmp_values;
-                    }
+                    total_value += match (high_value, mc_values.next()) {
+                        (Some(high_value), Some("H")) => high_value * 4f64,
+                        _ => tmp_values,
+                    };
                     nr_values += tmp_nrs;
                     samples += 1;
                     pb.inc(1);
