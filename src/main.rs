@@ -310,7 +310,8 @@ impl Otii {
                     nr_values += tmp_nrs;
                     samples += 1;
                     pb.inc(1);
-                    pb.set_message(&format!(
+
+                    pb.set_message(format!(
                         "{}/{}s",
                         indicatif::HumanDuration(std::time::Duration::from_secs(u64::from(
                             samples / SAMPLES_PER_SECOND
