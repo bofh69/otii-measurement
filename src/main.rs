@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use structopt::StructOpt;
 
 // TODO: Error handling, many if Some() .. tests without else
@@ -274,7 +276,12 @@ impl Otii {
 
     // TODO Rewrite to use closure for the actual parsing to remove
     // code duplication with wait_for_gpi
-    fn get_average_current(&mut self, max_samples: u32, quiet: bool) -> f64 {
+    fn get_average_current(
+        &mut self,
+        max_samples: u32,
+        quiet: bool,
+        should_abort: &Arc<AtomicBool>,
+    ) -> Option<f64> {
         let mut samples = 1;
         let mut last_sample = 0;
         let mut total_value = 0.0;
@@ -286,7 +293,7 @@ impl Otii {
             pb.set_style(indicatif::ProgressStyle::default_bar().progress_chars("█▉▊▋▌▍▎▏  "));
             Some(pb)
         };
-        loop {
+        while !should_abort.load(Ordering::Relaxed) {
             if let Some(line) = self.read_line() {
                 let mut data = line.trim().split(':');
                 if Some("d") == data.next() {
@@ -344,7 +351,11 @@ impl Otii {
         if let Some(pb) = pb {
             pb.finish();
         }
-        total_value / f64::from(nr_values)
+        if should_abort.load(Ordering::Relaxed) {
+            None
+        } else {
+            Some(total_value / f64::from(nr_values))
+        }
     }
 
     pub fn init(&mut self, calibrate: bool, volt: f32, dig_volt: f32) {
@@ -447,6 +458,14 @@ fn main() {
 
     let mc_gain = otii.get_gain("mc");
 
+    let should_abort = Arc::new(AtomicBool::new(false));
+    let set_abort = should_abort.clone();
+
+    ctrlc::set_handler(move || {
+        set_abort.store(true, Ordering::Relaxed);
+    })
+    .expect("Error setting Ctrl-C handler");
+
     otii.start_measurement();
 
     if let Some(value) = args.wait_for_gpi1 {
@@ -456,20 +475,28 @@ fn main() {
         otii.wait_for_gpi2(value);
     }
     // Flush some measurement.
-    otii.get_average_current(500 + args.wait_to_start_sec * 1000, true);
+    otii.get_average_current(500 + args.wait_to_start_sec * 1000, true, &should_abort);
 
     write_to_user(&format!(
         "Starting measurement for {} seconds",
         args.measurement_time_sec
     ));
     let start_measurement_time = std::time::Instant::now();
-    let avg = otii.get_average_current(args.measurement_time_sec * SAMPLES_PER_SECOND, args.quiet)
-        / mc_gain as f64;
-    write_to_user(&format!(
-        "Done. Measurement took {} seconds",
-        start_measurement_time.elapsed().as_secs()
-    ));
+    let avg = otii.get_average_current(
+        args.measurement_time_sec * SAMPLES_PER_SECOND,
+        args.quiet,
+        &should_abort,
+    );
+    if let Some(avg) = avg {
+        let avg = avg / mc_gain as f64;
+        write_to_user(&format!(
+            "Done. Measurement took {} seconds",
+            start_measurement_time.elapsed().as_secs()
+        ));
+        write_result(avg, args.unit);
+    } else {
+        write_to_user("Aborted");
+    }
+    write_to_user("Turning off power");
     otii.stop_measurement();
-
-    write_result(avg, args.unit);
 }
