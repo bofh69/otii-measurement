@@ -445,16 +445,13 @@ fn main() {
         args.dig_volt = Some(args.volt)
     }
 
-    // Handle timeout:
-    let timer = timer::Timer::new();
-    // If _guard is dropped, the timer is cancelled
-    let _guard = timer.schedule_with_delay(
-        chrono::Duration::minutes(i64::from(args.timeout_min)),
-        || {
-            write_to_user("Measurement took too long time, aborting...");
-            std::process::exit(1);
-        },
-    );
+    let timeout_min = args.timeout_min;
+    std::thread::spawn(move || {
+        let timeout = std::time::Duration::from_secs(timeout_min as u64 * 60);
+        std::thread::sleep(timeout);
+        write_to_user("Measurement took too long time, aborting...");
+        std::process::exit(1);
+    });
 
     let tracer = get_tracer(args.debug_filename);
 
