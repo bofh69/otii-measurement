@@ -152,7 +152,13 @@ pub struct Otii {
 impl Otii {
     pub fn new(dev: &std::path::PathBuf, tracer: Box<dyn Tracer>) -> Otii {
         use serial::SerialPort;
-        let mut port = std::io::BufReader::new(serial::open(dev).unwrap());
+        let mut port = std::io::BufReader::new(match serial::open(dev) {
+            Ok(port) => port,
+            Err(err) => {
+                write_to_user(&format!("Could not open {:?}: {}", dev, err));
+                std::process::exit(1);
+            }
+        });
         port.get_mut().configure(&SERIAL_SETTINGS).unwrap();
         port.get_mut()
             .set_timeout(std::time::Duration::from_secs(5))
