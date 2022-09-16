@@ -5,9 +5,15 @@ use structopt::StructOpt;
 
 // TODO: Error handling, many if Some() .. tests without else
 // TODO: Structure the code better, use submodules.
-// TODO: Handle low voltage and when the main volt is dropped due
-// to shorts.
 // TODO: Put Voltage in a wrapper
+
+// TODO: Stop at GPI-change
+//
+// TODO: Handle low voltage and when the main volt is dropped due
+// to shorts:
+//       alert:low-vbus -- too little input voltage
+//       alert:over-current -- short on the external port
+// TODO: update:main:off -- main is turned off (over-current protection).
 
 const SERIAL_SETTINGS: serial::PortSettings = serial::PortSettings {
     baud_rate: serial::Baud115200,
@@ -238,7 +244,7 @@ impl Otii {
         (sample, values)
     }
 
-    fn wait_for_gpi(&mut self, port: GpiPort, target: bool) {
+    fn wait_for_gpi(&mut self, port: GpiPort, target: bool, should_abort: &Arc<AtomicBool>) {
         use std::time::Instant;
 
         let mut last_sample = 0u32;
@@ -253,7 +259,7 @@ impl Otii {
         ));
         let start = Instant::now();
 
-        loop {
+        while !should_abort.load(Ordering::Relaxed) {
             if let Some(line) = self.read_line() {
                 let mut data = line.trim().split(':');
                 if Some("d") == data.next() {
@@ -272,12 +278,12 @@ impl Otii {
         }
     }
 
-    fn wait_for_gpi1(&mut self, target: bool) {
-        self.wait_for_gpi(GpiPort::GPI1, target)
+    fn wait_for_gpi1(&mut self, target: bool, should_abort: &Arc<AtomicBool>) {
+        self.wait_for_gpi(GpiPort::GPI1, target, should_abort)
     }
 
-    fn wait_for_gpi2(&mut self, target: bool) {
-        self.wait_for_gpi(GpiPort::GPI2, target)
+    fn wait_for_gpi2(&mut self, target: bool, should_abort: &Arc<AtomicBool>) {
+        self.wait_for_gpi(GpiPort::GPI2, target, should_abort)
     }
 
     // TODO Rewrite to use closure for the actual parsing to remove
@@ -320,17 +326,26 @@ impl Otii {
                             if let Ok(sample_value) = sample_val.parse::<f64>() {
                                 tmp_values += sample_value;
                                 tmp_nrs += 1;
+                            } else {
+                                println!("Low value incorrect, {}", sample_val);
                             }
+                        } else {
+                            println!("Low value missing");
                         }
                     }
                     if let Some(val) = mc_values.next() {
                         if let Ok(sample_value) = val.parse::<f64>() {
                             high_value = Some(sample_value);
+                        } else {
+                            println!("High value incorrect, {}", val);
                         }
+                    } else {
+                        println!("High value missing");
                     }
                     total_value += match (high_value, mc_values.next()) {
-                        (Some(high_value), Some("H")) => high_value * 4f64,
-                        _ => tmp_values,
+                        (_, Some("L")) => tmp_values,
+                        (Some(high_value), _) => high_value * 4f64,
+                        _ => panic!("No H/L"),
                     };
                     nr_values += tmp_nrs;
                     samples += 1;
@@ -351,6 +366,7 @@ impl Otii {
                     if samples > max_samples {
                         break;
                     }
+                    // TODO: Support aborting if GPI1/2 changes values
                 }
             }
         }
@@ -472,10 +488,10 @@ fn main() {
     otii.start_measurement();
 
     if let Some(value) = args.wait_for_gpi1 {
-        otii.wait_for_gpi1(value);
+        otii.wait_for_gpi1(value, &should_abort);
     }
     if let Some(value) = args.wait_for_gpi2 {
-        otii.wait_for_gpi2(value);
+        otii.wait_for_gpi2(value, &should_abort);
     }
     // Flush some measurement.
     otii.get_average_current(500 + args.wait_to_start_sec * 1000, true, &should_abort);
