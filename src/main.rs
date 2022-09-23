@@ -9,10 +9,6 @@ use structopt::StructOpt;
 
 // TODO: Stop at GPI-change
 //
-// TODO: Handle low voltage and when the main volt is dropped due
-// to shorts:
-//       alert:low-vbus -- too little input voltage
-//       alert:over-current -- short on the external port
 // TODO: update:main:off -- main is turned off (over-current protection).
 
 const SERIAL_SETTINGS: serial::PortSettings = serial::PortSettings {
@@ -93,6 +89,11 @@ struct Cli {
     /// Don't show a progress bar
     #[structopt(long = "quiet")]
     quiet: bool,
+    /* TODO:
+    /// Abort measurement on alerts from Otii
+    #[structopt(long = "abort-on-alert")]
+    abort_on_alert: bool,
+    */
 }
 
 pub trait Tracer {
@@ -262,17 +263,35 @@ impl Otii {
         while !should_abort.load(Ordering::Relaxed) {
             if let Some(line) = self.read_line() {
                 let mut data = line.trim().split(':');
-                if Some("d") == data.next() {
-                    let vec = data.collect::<Vec<&str>>();
-                    let (this_sample, values) = Self::parse_data_line(&vec);
-                    if last_sample != 0u32 && last_sample != (this_sample - 1) {
-                        write_to_user(&format!("Missed {} samples", this_sample - last_sample - 1));
+                match data.next() {
+                    Some("d") => {
+                        let vec = data.collect::<Vec<&str>>();
+                        let (this_sample, values) = Self::parse_data_line(&vec);
+                        if last_sample != 0u32 && last_sample != (this_sample - 1) {
+                            write_to_user(&format!(
+                                "Missed {} samples",
+                                this_sample - last_sample - 1
+                            ));
+                        }
+                        last_sample = this_sample;
+                        if values[field] == target_value {
+                            write_to_user(&format!(
+                                "Waited {} seconds.",
+                                start.elapsed().as_secs()
+                            ));
+                            break;
+                        }
                     }
-                    last_sample = this_sample;
-                    if values[field] == target_value {
-                        write_to_user(&format!("Waited {} seconds.", start.elapsed().as_secs()));
-                        break;
+                    Some("alert") => {
+                        let msg = match data.next() {
+                            Some("low-vbus") => "too low voltage".into(),
+                            Some("over-current") => "over current".into(),
+                            Some(s) => format!("unexpected alert, \"{s}\", from Otii"),
+                            None => "unknown alert from Otii".into(),
+                        };
+                        write_to_user(&format!("WARNING: {msg}"));
                     }
+                    _ => {}
                 }
             }
         }
@@ -308,65 +327,80 @@ impl Otii {
         while !should_abort.load(Ordering::Relaxed) {
             if let Some(line) = self.read_line() {
                 let mut data = line.trim().split(':');
-                if Some("d") == data.next() {
-                    let vec = data.collect::<Vec<&str>>();
-                    let (this_sample, values) = Self::parse_data_line(&vec);
-                    if last_sample != 0u32 && last_sample != (this_sample - 1) {
-                        write_to_user(&format!("Missed {} samples", this_sample - last_sample - 1));
-                    }
-                    last_sample = this_sample;
+                match data.next() {
+                    Some("d") => {
+                        let vec = data.collect::<Vec<&str>>();
+                        let (this_sample, values) = Self::parse_data_line(&vec);
+                        if last_sample != 0u32 && last_sample != (this_sample - 1) {
+                            write_to_user(&format!(
+                                "Missed {} samples",
+                                this_sample - last_sample - 1
+                            ));
+                        }
+                        last_sample = this_sample;
 
-                    let mut mc_values = values["mc"].split(',');
+                        let mut mc_values = values["mc"].split(',');
 
-                    let mut tmp_values = 0.0;
-                    let mut high_value = None;
-                    let mut tmp_nrs = 0;
-                    for _ in 0..4 {
-                        if let Some(sample_val) = mc_values.next() {
-                            if let Ok(sample_value) = sample_val.parse::<f64>() {
-                                tmp_values += sample_value;
-                                tmp_nrs += 1;
+                        let mut tmp_values = 0.0;
+                        let mut high_value = None;
+                        let mut tmp_nrs = 0;
+                        for _ in 0..4 {
+                            if let Some(sample_val) = mc_values.next() {
+                                if let Ok(sample_value) = sample_val.parse::<f64>() {
+                                    tmp_values += sample_value;
+                                    tmp_nrs += 1;
+                                } else {
+                                    println!("Low value incorrect, {}", sample_val);
+                                }
                             } else {
-                                println!("Low value incorrect, {}", sample_val);
+                                println!("Low value missing");
+                            }
+                        }
+                        if let Some(val) = mc_values.next() {
+                            if let Ok(sample_value) = val.parse::<f64>() {
+                                high_value = Some(sample_value);
+                            } else {
+                                println!("High value incorrect, {}", val);
                             }
                         } else {
-                            println!("Low value missing");
+                            println!("High value missing");
                         }
-                    }
-                    if let Some(val) = mc_values.next() {
-                        if let Ok(sample_value) = val.parse::<f64>() {
-                            high_value = Some(sample_value);
-                        } else {
-                            println!("High value incorrect, {}", val);
+                        total_value += match (high_value, mc_values.next()) {
+                            (_, Some("L")) => tmp_values,
+                            (Some(high_value), _) => high_value * 4f64,
+                            _ => panic!("No H/L"),
+                        };
+                        nr_values += tmp_nrs;
+                        samples += 1;
+                        if let Some(ref pb) = &pb {
+                            pb.inc(1);
+
+                            pb.set_message(format!(
+                                "{}/{}s",
+                                indicatif::HumanDuration(std::time::Duration::from_secs(
+                                    u64::from(samples / SAMPLES_PER_SECOND)
+                                )),
+                                indicatif::HumanDuration(std::time::Duration::from_secs(
+                                    u64::from(max_samples)
+                                ))
+                            ));
                         }
-                    } else {
-                        println!("High value missing");
-                    }
-                    total_value += match (high_value, mc_values.next()) {
-                        (_, Some("L")) => tmp_values,
-                        (Some(high_value), _) => high_value * 4f64,
-                        _ => panic!("No H/L"),
-                    };
-                    nr_values += tmp_nrs;
-                    samples += 1;
-                    if let Some(ref pb) = &pb {
-                        pb.inc(1);
 
-                        pb.set_message(format!(
-                            "{}/{}s",
-                            indicatif::HumanDuration(std::time::Duration::from_secs(u64::from(
-                                samples / SAMPLES_PER_SECOND
-                            ))),
-                            indicatif::HumanDuration(std::time::Duration::from_secs(u64::from(
-                                max_samples
-                            )))
-                        ));
+                        if samples > max_samples {
+                            break;
+                        }
+                        // TODO: Support aborting if GPI1/2 changes values
                     }
-
-                    if samples > max_samples {
-                        break;
+                    Some("alert") => {
+                        let msg = match data.next() {
+                            Some("low-vbus") => "too low voltage".into(),
+                            Some("over-current") => "over current".into(),
+                            Some(s) => format!("unexpected alert, \"{s}\", from Otii"),
+                            None => "unknown alert from Otii".into(),
+                        };
+                        write_to_user(&format!("WARNING: {msg}"));
                     }
-                    // TODO: Support aborting if GPI1/2 changes values
+                    _ => {}
                 }
             }
         }
