@@ -1,11 +1,11 @@
 [package]
 name = "otii_measurement"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Sebastian Andersson <sebastian@bittr.nu>"]
 edition = "2018"
 
 [dependencies]
 structopt = "0.3.*"
 serial = "0.4.*"
-indicatif = "0.16.*"
+indicatif = "0.17.*"
 ctrlc = "3.2.*"
