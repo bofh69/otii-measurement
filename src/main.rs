@@ -1,7 +1,7 @@
+use clap::Parser;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use structopt::StructOpt;
 
 // TODO: Error handling, many if Some() .. tests without else
 // TODO: Structure the code better, use submodules.
@@ -26,6 +26,7 @@ enum GpiPort {
     GPI2,
 }
 
+#[derive(Clone)]
 enum Unit {
     Ampere,
     MilliAmpere,
@@ -33,65 +34,63 @@ enum Unit {
 }
 
 /// Measure current with Otii Arc measurement tool
-#[derive(StructOpt)]
-struct Cli {
+#[derive(Parser)]
+struct Args {
     /// Give up measurement after this many minutes
-    #[structopt(long, default_value = "20")]
+    #[arg(long, default_value = "20")]
     timeout_min: u32,
 
     /// Measure for this many seconds
-    #[structopt(name = "measurement-time", long, default_value = "1")]
+    #[arg(name = "measurement-time", long, default_value = "1")]
     measurement_time_sec: u32,
 
     /// Wait this many seconds until measurement starts
-    #[structopt(name = "wait", long, default_value = "0")]
+    #[arg(name = "wait", long, default_value = "0")]
     wait_to_start_sec: u32,
 
     /// The main voltage
-    #[structopt(short, long, default_value = "3.3")]
+    #[arg(short, long, default_value = "3.3")]
     volt: f32,
 
     /// Voltage for digital output
     ///
     /// If not given, use main voltage
     ///
-    #[structopt(name = "dig-volt", long)]
+    #[arg(name = "dig-volt", long)]
     dig_volt: Option<f32>,
 
     /// TTY for the Otii Arc
-    #[structopt(parse(from_os_str))]
-    #[structopt(long, default_value = "/dev/serial/by-id/usb-Qoitech_Arc-if00")]
+    #[arg(long, default_value = "/dev/serial/by-id/usb-Qoitech_Arc-if00")]
     dev: std::path::PathBuf,
 
     /// Output debug trace
-    #[structopt(parse(from_os_str))]
-    #[structopt(name = "filename", long = "debug")]
+    #[arg(name = "filename", long = "debug")]
     debug_filename: Option<std::path::PathBuf>,
 
     /// What unit to measure in
     ///
     /// Valid options are A, mA, uA
-    #[structopt(short, long, default_value = "A")]
+    #[arg(short, long, default_value = "A")]
     unit: Unit,
 
     /// Calibrate Otii Arc before measurement
-    #[structopt(long)]
+    #[arg(long)]
     calibrate: bool,
 
     /// GPI1 needs to be true before measurement
-    #[structopt(long = "wait-for-GPI1")]
+    #[arg(long = "wait-for-GPI1")]
     wait_for_gpi1: Option<bool>,
 
     /// GPI2 needs to be true before measurement
-    #[structopt(long = "wait-for-GPI2")]
+    #[arg(long = "wait-for-GPI2")]
     wait_for_gpi2: Option<bool>,
 
     /// Don't show a progress bar
-    #[structopt(long = "quiet")]
+    #[arg(long = "quiet")]
     quiet: bool,
     /* TODO:
     /// Abort measurement on alerts from Otii
-    #[structopt(long = "abort-on-alert")]
+    #[arg(long = "abort-on-alert")]
     abort_on_alert: bool,
     */
 }
@@ -489,7 +488,7 @@ fn get_tracer(debug_filename: Option<std::path::PathBuf>) -> Box<dyn Tracer> {
 }
 
 fn main() {
-    let mut args = Cli::from_args();
+    let mut args = Args::parse();
 
     if args.dig_volt.is_none() {
         args.dig_volt = Some(args.volt)
@@ -552,4 +551,10 @@ fn main() {
     }
     write_to_user("Turning off power");
     otii.stop_measurement();
+}
+
+#[test]
+fn verify_cli() {
+    use clap::CommandFactory;
+    Args::command().debug_assert()
 }

@@ -5,7 +5,7 @@ authors = ["Sebastian Andersson <sebastian@bittr.nu>"]
 edition = "2021"
 
 [dependencies]
-structopt = "0.3.*"
+clap = { version = "4.*", features = ["derive"] }
 serial = "0.4.*"
 indicatif = "0.17.*"
 ctrlc = "3.4.*"
