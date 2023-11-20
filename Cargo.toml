@@ -3,6 +3,7 @@ name = "otii_measurement"
 version = "0.1.1"
 authors = ["Sebastian Andersson <sebastian@bittr.nu>"]
 edition = "2021"
+rust-version = "1.70.0"
 
 [dependencies]
 clap = { version = "4.*", features = ["derive"] }
