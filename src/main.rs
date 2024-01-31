@@ -26,7 +26,7 @@ enum GpiPort {
     GPI2,
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 enum Unit {
     Ampere,
     MilliAmpere,
@@ -475,7 +475,7 @@ fn write_result(avg: f64, unit: Unit) {
         }
     };
 
-    println!("{} {}", avg, unit);
+    println!("{avg:.02} {unit}");
 }
 
 fn get_tracer(debug_filename: Option<std::path::PathBuf>) -> Box<dyn Tracer> {
