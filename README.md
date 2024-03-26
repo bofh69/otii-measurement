@@ -44,15 +44,9 @@ rustup target add armv7-unknown-linux-musleabihf
 sudo apt-get install gcc-multilib-arm-linux-gnueabihf musl-tools
 ```
 
-Add to `~/.cargo/config`:
-```
-[target.armv7-unknown-linux-musleabihf]
-linker = "arm-linux-gnueabihf-gcc"
-```
-
-Build with:
+### Build with
 ```sh
-CC=/usr/bin/musl-gcc cargo build --target armv7-unknown-linux-musleabihf --release
+cargo build --target armv7-unknown-linux-musleabihf --release
 ```
 
 The file is then in ./target/armv7-unknown-linux-musleabihf/release/otii_measurement
